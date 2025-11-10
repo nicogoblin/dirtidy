@@ -1,12 +1,12 @@
 [package]
 name = "dirtidy"
 version = "0.1.0"
-edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+edition = "2024"
+authors = ["Nicola Bonsi <nicola.bonsi95@gmail.com>"]
 description = "A directory organization and cleanup utility"
 
 [dependencies]
-infer = "0.15"
+infer = "0.19"
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 
