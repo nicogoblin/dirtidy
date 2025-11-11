@@ -87,11 +87,11 @@ fn organize_directory(base_path: &Path) -> Result<(), String> {
     let mapper = FileMapper::default();
 
     for entry in entries.flatten() {
-        if let Ok(file_type) = entry.file_type() {
-            if file_type.is_file() {
-                let file_info = detect_file_type(&entry, &mapper);
-                file_infos.push(file_info);
-            }
+        if let Ok(file_type) = entry.file_type()
+            && file_type.is_file()
+        {
+            let file_info = detect_file_type(&entry, &mapper);
+            file_infos.push(file_info);
         }
     }
 

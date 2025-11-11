@@ -370,17 +370,17 @@ impl FileMapper {
     /// ```
     pub fn categorize(&self, mime_type: Option<&str>, ext: Option<&str>) -> Category {
         // Try MIME type first
-        if let Some(mime) = mime_type {
-            if let Some(category) = self.mime_to_category(mime) {
-                return category;
-            }
+        if let Some(mime) = mime_type
+            && let Some(category) = self.mime_to_category(mime)
+        {
+            return category;
         }
 
         // Fall back to extension
-        if let Some(extension) = ext {
-            if let Some(category) = self.extension_to_category(extension) {
-                return category;
-            }
+        if let Some(extension) = ext
+            && let Some(category) = self.extension_to_category(extension)
+        {
+            return category;
         }
 
         // Default to "Other"

@@ -113,10 +113,10 @@ impl UndoManager {
         }
 
         // Only delete history if undo was successful
-        if report.is_complete_success() {
-            if let Err(e) = OperationLog::delete(base_path) {
-                eprintln!("Warning: Could not delete history file: {}", e);
-            }
+        if report.is_complete_success()
+            && let Err(e) = OperationLog::delete(base_path)
+        {
+            eprintln!("Warning: Could not delete history file: {}", e);
         }
 
         Ok(report)

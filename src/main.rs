@@ -1,4 +1,4 @@
-use dirtidy::cli::{run_cli, OrganizeCommand};
+use dirtidy::cli::{OrganizeCommand, run_cli};
 use std::env;
 use std::path::Path;
 

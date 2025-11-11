@@ -3,7 +3,7 @@
 /// This module provides functionality to organize files by moving them into
 /// category-specific subdirectories within a given base directory.
 /// It handles directory creation, file movement, and operation history logging.
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
 

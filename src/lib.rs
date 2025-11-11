@@ -12,4 +12,4 @@ pub use file_category::{Category, FileMapper};
 pub use file_organizer::FileOrganizer;
 pub use undo::{UndoManager, UndoReport};
 
-pub use cli::{run_cli, OrganizeCommand};
+pub use cli::{OrganizeCommand, run_cli};
