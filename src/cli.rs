@@ -31,7 +31,10 @@ pub struct FileInfo {
 #[derive(Debug, Clone, Copy)]
 pub enum OrganizeCommand {
     /// Organize files in a directory.
-    Organize,
+    Organize {
+        /// If true, simulate the operation without making changes.
+        dry_run: bool,
+    },
     /// Undo the previous organization.
     Undo,
 }
@@ -52,7 +55,7 @@ pub enum OrganizeCommand {
 /// use dirtidy::cli::{run_cli, OrganizeCommand};
 /// use std::path::Path;
 ///
-/// let result = run_cli(OrganizeCommand::Organize, Path::new("/path/to/directory"));
+/// let result = run_cli(OrganizeCommand::Organize { dry_run: false }, Path::new("/path/to/directory"));
 /// match result {
 ///     Ok(()) => println!("Operation completed successfully"),
 ///     Err(e) => eprintln!("Error: {}", e),
@@ -60,7 +63,13 @@ pub enum OrganizeCommand {
 /// ```
 pub fn run_cli(command: OrganizeCommand, dir_path: &Path) -> Result<(), String> {
     match command {
-        OrganizeCommand::Organize => organize_directory(dir_path),
+        OrganizeCommand::Organize { dry_run } => {
+            if dry_run {
+                organize_directory_dry_run(dir_path)
+            } else {
+                organize_directory(dir_path)
+            }
+        }
         OrganizeCommand::Undo => undo_organization(dir_path),
     }
 }
@@ -147,6 +156,88 @@ fn organize_directory(base_path: &Path) -> Result<(), String> {
     if organize_failed {
         eprintln!("\nSome files could not be organized. Please review errors above.");
     }
+
+    Ok(())
+}
+
+/// Simulates file organization without making any actual changes.
+///
+/// This function performs the same analysis as `organize_directory` but:
+/// 1. Reads all files from the directory
+/// 2. Detects their types using MIME type detection
+/// 3. Categorizes them using the FileMapper
+/// 4. Displays what would be organized WITHOUT moving any files
+/// 5. Shows a summary of files by category
+///
+/// # Arguments
+///
+/// * `base_path` - The directory to analyze
+fn organize_directory_dry_run(base_path: &Path) -> Result<(), String> {
+    println!("DRY RUN: Analyzing contents of: {}", base_path.display());
+
+    let entries = fs::read_dir(base_path)
+        .map_err(|e| format!("Error reading directory {}: {}", base_path.display(), e))?;
+
+    let mut file_infos: Vec<FileInfo> = Vec::new();
+    let mapper = FileMapper::default();
+
+    for entry in entries.flatten() {
+        if let Ok(file_type) = entry.file_type()
+            && file_type.is_file()
+        {
+            let file_info = detect_file_type(&entry, &mapper);
+            file_infos.push(file_info);
+        }
+    }
+
+    if file_infos.is_empty() {
+        println!("No files found to organize.");
+        return Ok(());
+    }
+
+    println!("\nDRY RUN: Files would be organized as follows:");
+    let mut category_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+
+    for info in &file_infos {
+        let type_info = if let Some(ref ftype) = info.file_type {
+            format!(" [{}]", ftype)
+        } else {
+            String::new()
+        };
+        let mime_info = if let Some(ref mime) = info.mime_type {
+            format!(" ({})", mime)
+        } else {
+            String::new()
+        };
+        let category_dir = info.category.dir_name();
+        println!(" - {}{}{}", info.name, type_info, mime_info);
+        println!("   → Would move to {}/", category_dir);
+
+        *category_counts.entry(category_dir.to_string()).or_insert(0) += 1;
+    }
+
+    println!("\nDRY RUN SUMMARY:");
+    println!("Total files: {}", file_infos.len());
+
+    // Sort category names for consistent output
+    let mut categories: Vec<_> = category_counts.iter().collect();
+    categories.sort_by_key(|&(name, _)| name);
+
+    for (category, count) in categories {
+        println!(
+            "  {} {}: {}",
+            category,
+            if *count == 1 { "file" } else { "files" },
+            count
+        );
+    }
+
+    println!("\n✓ Dry run complete. No files were modified.");
+    println!(
+        "Run 'dirtidy {}' (without --dry-run) to execute the organization.",
+        base_path.display()
+    );
 
     Ok(())
 }
@@ -254,11 +345,16 @@ mod tests {
 
     #[test]
     fn test_organize_command_enum() {
-        let organize = OrganizeCommand::Organize;
+        let organize = OrganizeCommand::Organize { dry_run: false };
+        let organize_dry_run = OrganizeCommand::Organize { dry_run: true };
         let undo = OrganizeCommand::Undo;
 
         // Just verify enum variants can be created
-        matches!(organize, OrganizeCommand::Organize);
+        matches!(organize, OrganizeCommand::Organize { dry_run: false });
+        matches!(
+            organize_dry_run,
+            OrganizeCommand::Organize { dry_run: true }
+        );
         matches!(undo, OrganizeCommand::Undo);
     }
 }
