@@ -5,7 +5,9 @@
 //! - File type detection
 //! - Organization orchestration
 //! - Undo operation handling
+//! - File filtering and exclusion
 
+use crate::config::FilterConfig;
 use crate::file_category::FileMapper;
 use crate::file_organizer::{FileOrganizer, OperationLog};
 use crate::undo::UndoManager;
@@ -62,12 +64,27 @@ pub enum OrganizeCommand {
 /// }
 /// ```
 pub fn run_cli(command: OrganizeCommand, dir_path: &Path) -> Result<(), String> {
+    run_cli_with_config(command, dir_path, None)
+}
+
+/// Runs the CLI application with optional configuration file.
+///
+/// # Arguments
+///
+/// * `command` - The command to execute (Organize or Undo)
+/// * `dir_path` - The directory path to operate on
+/// * `config_path` - Optional path to configuration file
+pub fn run_cli_with_config(
+    command: OrganizeCommand,
+    dir_path: &Path,
+    config_path: Option<&Path>,
+) -> Result<(), String> {
     match command {
         OrganizeCommand::Organize { dry_run } => {
             if dry_run {
-                organize_directory_dry_run(dir_path)
+                organize_directory_dry_run_with_config(dir_path, config_path)
             } else {
-                organize_directory(dir_path)
+                organize_directory_with_config(dir_path, config_path)
             }
         }
         OrganizeCommand::Undo => undo_organization(dir_path),
@@ -77,17 +94,29 @@ pub fn run_cli(command: OrganizeCommand, dir_path: &Path) -> Result<(), String> 
 /// Organizes files in a directory into category subdirectories.
 ///
 /// This function:
-/// 1. Reads all files from the directory
-/// 2. Detects their types using MIME type detection
-/// 3. Categorizes them using the FileMapper
-/// 4. Moves them to appropriate category directories
-/// 5. Records the operations for potential undo
+/// 1. Loads filter configuration (if available)
+/// 2. Reads all files from the directory
+/// 3. Applies filtering rules to exclude files
+/// 4. Detects types using MIME type detection
+/// 5. Categorizes them using the FileMapper
+/// 6. Moves them to appropriate category directories
+/// 7. Records the operations for potential undo
 ///
 /// # Arguments
 ///
 /// * `base_path` - The directory to organize
-fn organize_directory(base_path: &Path) -> Result<(), String> {
+pub fn organize_directory_with_config(
+    base_path: &Path,
+    config_path: Option<&Path>,
+) -> Result<(), String> {
     println!("Organizing contents of: {}", base_path.display());
+
+    // Load and compile filter configuration
+    let config = FilterConfig::load(config_path)
+        .map_err(|e| format!("Error loading configuration: {}", e))?;
+    let compiled_filters = config
+        .compile()
+        .map_err(|e| format!("Error compiling filters: {}", e))?;
 
     let entries = fs::read_dir(base_path)
         .map_err(|e| format!("Error reading directory {}: {}", base_path.display(), e))?;
@@ -99,8 +128,12 @@ fn organize_directory(base_path: &Path) -> Result<(), String> {
         if let Ok(file_type) = entry.file_type()
             && file_type.is_file()
         {
-            let file_info = detect_file_type(&entry, &mapper);
-            file_infos.push(file_info);
+            let file_path = entry.path();
+            // Apply filter rules
+            if compiled_filters.should_include(&file_path) {
+                let file_info = detect_file_type(&entry, &mapper);
+                file_infos.push(file_info);
+            }
         }
     }
 
@@ -163,17 +196,30 @@ fn organize_directory(base_path: &Path) -> Result<(), String> {
 /// Simulates file organization without making any actual changes.
 ///
 /// This function performs the same analysis as `organize_directory` but:
-/// 1. Reads all files from the directory
-/// 2. Detects their types using MIME type detection
-/// 3. Categorizes them using the FileMapper
-/// 4. Displays what would be organized WITHOUT moving any files
-/// 5. Shows a summary of files by category
+/// 1. Loads filter configuration (if available)
+/// 2. Reads all files from the directory
+/// 3. Applies filtering rules to exclude files
+/// 4. Detects their types using MIME type detection
+/// 5. Categorizes them using the FileMapper
+/// 6. Displays what would be organized WITHOUT moving any files
+/// 7. Shows a summary of files by category
 ///
 /// # Arguments
 ///
 /// * `base_path` - The directory to analyze
-fn organize_directory_dry_run(base_path: &Path) -> Result<(), String> {
+/// * `config_path` - Optional path to configuration file
+pub fn organize_directory_dry_run_with_config(
+    base_path: &Path,
+    config_path: Option<&Path>,
+) -> Result<(), String> {
     println!("DRY RUN: Analyzing contents of: {}", base_path.display());
+
+    // Load and compile filter configuration
+    let config = FilterConfig::load(config_path)
+        .map_err(|e| format!("Error loading configuration: {}", e))?;
+    let compiled_filters = config
+        .compile()
+        .map_err(|e| format!("Error compiling filters: {}", e))?;
 
     let entries = fs::read_dir(base_path)
         .map_err(|e| format!("Error reading directory {}: {}", base_path.display(), e))?;
@@ -185,8 +231,12 @@ fn organize_directory_dry_run(base_path: &Path) -> Result<(), String> {
         if let Ok(file_type) = entry.file_type()
             && file_type.is_file()
         {
-            let file_info = detect_file_type(&entry, &mapper);
-            file_infos.push(file_info);
+            let file_path = entry.path();
+            // Apply filter rules
+            if compiled_filters.should_include(&file_path) {
+                let file_info = detect_file_type(&entry, &mapper);
+                file_infos.push(file_info);
+            }
         }
     }
 

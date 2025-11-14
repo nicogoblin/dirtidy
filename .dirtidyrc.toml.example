@@ -1,0 +1,133 @@
+# dirtidy Configuration File Example
+#
+# This example configuration file shows all available filtering and exclusion options.
+# Copy this to .dirtidyrc.toml in your project directory or ~/.config/dirtidy/config.toml
+# in your home directory to customize dirtidy's behavior.
+#
+# Configuration file lookup order:
+# 1. Path specified with --config CLI argument
+# 2. .dirtidyrc.toml in current directory
+# 3. ~/.config/dirtidy/config.toml in home directory
+# 4. Defaults (hides hidden files only)
+
+[filters]
+# Whether to include files starting with "." (hidden files)
+# Defaults to false if not specified
+enable_hidden_files = false
+
+# Rules for excluding files from organization
+[filters.exclude]
+
+# Exclude files by exact filename (e.g., macOS, Windows, git metadata)
+filenames = [
+    ".DS_Store",        # macOS folder metadata
+    "Thumbs.db",        # Windows thumbnail cache
+    "desktop.ini",      # Windows directory settings
+    ".git",             # Git repository (if a file)
+]
+
+# Exclude files by glob patterns
+# Supports:
+# - *.ext - files with extension
+# - dir/** - directory and all contents
+patterns = [
+    "*.tmp",            # Temporary files
+    "*.cache",          # Cache files
+    "*.bak",            # Backup files (can also use extensions = ["bak"])
+    "*.swp",            # Vim swap files
+    "*.swo",            # Vim backup files
+    "*~",               # Backup files
+    ".env*",            # Environment variable files (.env, .env.local, etc.)
+    "node_modules/**",  # Node.js dependencies
+    "dist/**",          # Build output
+    "build/**",         # Build output
+    "target/**",        # Rust build output
+    ".venv/**",         # Python virtual environment
+    "__pycache__/**",   # Python cache
+]
+
+# Exclude files by extension (shorthand for *.ext patterns)
+# Extensions should be listed without the dot
+extensions = [
+    "tmp",              # Temporary files
+    "log",              # Log files
+    "pid",              # Process ID files
+    "lock",             # Lock files
+]
+
+# Exclude files by regex pattern (for advanced users)
+# Patterns are matched against the filename only (not full path)
+regex = [
+    # Example: match test files
+    # "^test_.*\\.txt$",
+
+    # Example: match files with pattern like filename.YYYYMMDD.bak
+    # ".*\\.\\d{8}\\.bak$",
+]
+
+# Rules for including files - whitelist patterns that override exclude rules
+# If a file matches an include pattern, it will be organized even if it matches exclude rules
+[filters.include]
+
+# Include patterns (whitelist) - overrides any exclude rules
+patterns = [
+    # Example: always include important hidden config even though hidden files are excluded
+    # ".importantrc",
+
+    # Example: always organize .pdf files even if in a normally-excluded directory
+    # "**/*.pdf",
+]
+
+# ============================================================================
+# USAGE EXAMPLES
+# ============================================================================
+#
+# Command line usage:
+#
+#   # Use default configuration (hides hidden files)
+#   dirtidy /path/to/directory
+#
+#   # Dry-run with default configuration
+#   dirtidy /path/to/directory --dry-run
+#
+#   # Use specific configuration file
+#   dirtidy /path/to/directory --config ~/.dirtidyrc.toml
+#
+#   # Dry-run with custom config
+#   dirtidy /path/to/directory --dry-run --config /path/to/config.toml
+#
+#   # Undo previous organization
+#   dirtidy /path/to/directory --undo
+#
+# ============================================================================
+# CONFIGURATION BEHAVIOR
+# ============================================================================
+#
+# File inclusion logic (checked in this order):
+#
+# 1. Include patterns (whitelist) - if matched, file is ALWAYS included
+# 2. Hidden file filter - if file starts with "." and enable_hidden_files=false, exclude
+# 3. Exact filename match - if in exclude.filenames, exclude
+# 4. File extension match - if in exclude.extensions, exclude (case-insensitive)
+# 5. Glob patterns - if matches exclude.patterns, exclude
+# 6. Regex patterns - if matches exclude.regex, exclude
+# 7. Default - include (file will be organized)
+#
+# ============================================================================
+# COMMON PATTERNS
+# ============================================================================
+#
+# Hidden files:
+#   .DS_Store, .git, .gitignore, .env, .bashrc, .vimrc
+#
+# Temporary files:
+#   *.tmp, *.temp, *.bak, *.swp, *~
+#
+# System files:
+#   Thumbs.db, desktop.ini, $RECYCLE.BIN
+#
+# Build/Cache directories:
+#   node_modules/**, dist/**, build/**, target/**, __pycache__/**
+#
+# Log files:
+#   *.log, *.err, *.out

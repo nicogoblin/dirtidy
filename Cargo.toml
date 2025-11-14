@@ -9,6 +9,10 @@ description = "A directory organization and cleanup utility"
 infer = "0.19"
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
+toml = "0.8"
+glob = "0.3"
+regex = "1.10"
+serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3"
