@@ -10,7 +10,9 @@
 use crate::config::FilterConfig;
 use crate::file_category::FileMapper;
 use crate::file_organizer::{FileOrganizer, OperationLog};
+use crate::output::OutputFormatter;
 use crate::undo::UndoManager;
+use std::collections::HashMap;
 use std::fs::{self, DirEntry};
 use std::path::{Path, PathBuf};
 
@@ -109,7 +111,7 @@ pub fn organize_directory_with_config(
     base_path: &Path,
     config_path: Option<&Path>,
 ) -> Result<(), String> {
-    println!("Organizing contents of: {}", base_path.display());
+    OutputFormatter::info(&format!("Organizing contents of: {}", base_path.display()));
 
     // Load and compile filter configuration
     let config = FilterConfig::load(config_path)
@@ -137,57 +139,68 @@ pub fn organize_directory_with_config(
         }
     }
 
-    println!("Files found and organizing:");
     let mut operation_log = OperationLog::new(base_path.to_path_buf());
     let mut organize_failed = false;
+    let mut category_counts: HashMap<String, usize> = HashMap::new();
 
-    for info in &file_infos {
-        let type_info = if let Some(ref ftype) = info.file_type {
-            format!(" [{}]", ftype)
-        } else {
-            String::new()
-        };
-        let mime_info = if let Some(ref mime) = info.mime_type {
-            format!(" ({})", mime)
-        } else {
-            String::new()
-        };
-        let category_dir = info.category.dir_name();
-        println!(" - {}{}{}", info.name, type_info, mime_info);
+    if file_infos.is_empty() {
+        OutputFormatter::info("No files found to organize.");
+    } else {
+        OutputFormatter::header(&format!(
+            "Organizing {} file{}",
+            file_infos.len(),
+            if file_infos.len() == 1 { "" } else { "s" }
+        ));
 
-        match FileOrganizer::move_to_category_with_record(base_path, &info.path, category_dir) {
-            Ok(operation) => {
-                println!("   ✓ Moved to {}/", category_dir);
-                operation_log.add_operation(operation);
-            }
-            Err(e) => {
-                eprintln!("   ✗ Error: {}", e);
-                organize_failed = true;
+        // Create progress bar
+        let pb = OutputFormatter::create_progress_bar(file_infos.len() as u64);
+
+        for info in &file_infos {
+            let category_dir = info.category.dir_name();
+
+            match FileOrganizer::move_to_category_with_record(base_path, &info.path, category_dir) {
+                Ok(operation) => {
+                    *category_counts.entry(category_dir.to_string()).or_insert(0) += 1;
+                    operation_log.add_operation(operation);
+                    pb.inc(1);
+                }
+                Err(e) => {
+                    OutputFormatter::error(&format!("Failed to organize '{}': {}", info.name, e));
+                    organize_failed = true;
+                    pb.inc(1);
+                }
             }
         }
+
+        pb.finish_with_message("Organization processing complete");
     }
 
-    // Save the operation log
+    // Save the operation log (even if empty)
     match operation_log.save(base_path) {
         Ok(()) => {
-            println!("\nOrganization complete!");
-            println!(
+            OutputFormatter::success("Organization complete!");
+            OutputFormatter::info(&format!(
                 "History saved. Use 'dirtidy {} --undo' to revert changes.",
                 base_path.display()
-            );
+            ));
         }
         Err(e) => {
-            eprintln!("Warning: Could not save history: {}", e);
+            OutputFormatter::warning(&format!("Could not save history: {}", e));
             if organize_failed {
-                eprintln!(
-                    "Undo may not be available. Please verify files were organized correctly."
+                OutputFormatter::warning(
+                    "Undo may not be available. Please verify files were organized correctly.",
                 );
             }
         }
     }
 
     if organize_failed {
-        eprintln!("\nSome files could not be organized. Please review errors above.");
+        OutputFormatter::warning("Some files could not be organized. Please review errors above.");
+    }
+
+    // Display summary table
+    if !file_infos.is_empty() {
+        OutputFormatter::summary_table(&category_counts, file_infos.len());
     }
 
     Ok(())
@@ -212,7 +225,7 @@ pub fn organize_directory_dry_run_with_config(
     base_path: &Path,
     config_path: Option<&Path>,
 ) -> Result<(), String> {
-    println!("DRY RUN: Analyzing contents of: {}", base_path.display());
+    OutputFormatter::dry_run_notice(&format!("Analyzing contents of: {}", base_path.display()));
 
     // Load and compile filter configuration
     let config = FilterConfig::load(config_path)
@@ -241,13 +254,17 @@ pub fn organize_directory_dry_run_with_config(
     }
 
     if file_infos.is_empty() {
-        println!("No files found to organize.");
+        OutputFormatter::info("No files found to organize.");
         return Ok(());
     }
 
-    println!("\nDRY RUN: Files would be organized as follows:");
-    let mut category_counts: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
+    OutputFormatter::header(&format!(
+        "Files would be organized as follows ({} file{})",
+        file_infos.len(),
+        if file_infos.len() == 1 { "" } else { "s" }
+    ));
+
+    let mut category_counts: HashMap<String, usize> = HashMap::new();
 
     for info in &file_infos {
         let type_info = if let Some(ref ftype) = info.file_type {
@@ -261,33 +278,20 @@ pub fn organize_directory_dry_run_with_config(
             String::new()
         };
         let category_dir = info.category.dir_name();
-        println!(" - {}{}{}", info.name, type_info, mime_info);
-        println!("   → Would move to {}/", category_dir);
+        OutputFormatter::plain(&format!(" - {}{}{}", info.name, type_info, mime_info));
+        OutputFormatter::info(&format!("   → Would move to {}/", category_dir));
 
         *category_counts.entry(category_dir.to_string()).or_insert(0) += 1;
     }
 
-    println!("\nDRY RUN SUMMARY:");
-    println!("Total files: {}", file_infos.len());
+    // Display summary table
+    OutputFormatter::summary_table(&category_counts, file_infos.len());
 
-    // Sort category names for consistent output
-    let mut categories: Vec<_> = category_counts.iter().collect();
-    categories.sort_by_key(|&(name, _)| name);
-
-    for (category, count) in categories {
-        println!(
-            "  {} {}: {}",
-            category,
-            if *count == 1 { "file" } else { "files" },
-            count
-        );
-    }
-
-    println!("\n✓ Dry run complete. No files were modified.");
-    println!(
+    OutputFormatter::success("Dry run complete. No files were modified.");
+    OutputFormatter::info(&format!(
         "Run 'dirtidy {}' (without --dry-run) to execute the organization.",
         base_path.display()
-    );
+    ));
 
     Ok(())
 }
@@ -304,27 +308,27 @@ pub fn organize_directory_dry_run_with_config(
 ///
 /// * `base_path` - The directory where organization was performed
 fn undo_organization(base_path: &Path) -> Result<(), String> {
-    println!("Undoing previous organization...");
+    OutputFormatter::info("Undoing previous organization...");
 
     match UndoManager::undo(base_path) {
         Ok(report) => {
-            println!("Undo complete!");
-            println!("  Restored: {}", report.restored_files);
+            OutputFormatter::success("Undo complete!");
+            OutputFormatter::plain(&format!("  Restored: {}", report.restored_files));
 
             if !report.skipped_files.is_empty() {
-                println!("  Skipped: {}", report.skipped_files.len());
+                OutputFormatter::warning(&format!("  Skipped: {}", report.skipped_files.len()));
                 for (path, reason) in &report.skipped_files {
-                    println!("    - {}: {}", path.display(), reason);
+                    OutputFormatter::plain(&format!("    - {}: {}", path.display(), reason));
                 }
             }
 
             if !report.failed_restores.is_empty() {
-                println!("  Failed: {}", report.failed_restores.len());
+                OutputFormatter::error(&format!("  Failed: {}", report.failed_restores.len()));
                 for (path, reason) in &report.failed_restores {
-                    eprintln!("    - {}: {}", path.display(), reason);
+                    OutputFormatter::error(&format!("    - {}: {}", path.display(), reason));
                 }
-                eprintln!("\nWarning: History file was NOT deleted due to failures.");
-                eprintln!("Please fix the issues and try again.");
+                OutputFormatter::warning("History file was NOT deleted due to failures.");
+                OutputFormatter::warning("Please fix the issues and try again.");
             }
 
             Ok(())

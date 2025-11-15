@@ -1,58 +1,50 @@
+use clap::Parser;
 use dirtidy::cli::{OrganizeCommand, run_cli_with_config};
-use std::env;
-use std::path::{Path, PathBuf};
+use dirtidy::output::OutputFormatter;
+use std::path::PathBuf;
+
+/// A directory organization and cleanup utility.
+///
+/// Automatically organizes files in a directory into category-based subdirectories.
+/// Supports dry-run mode for safe previewing and undo functionality to revert changes.
+#[derive(Parser, Debug)]
+#[command(name = "dirtidy")]
+#[command(about = "Directory organization made easy!", long_about = None)]
+#[command(version)]
+#[command(author = "Nicola Bonsi <nicola.bonsi95@gmail.com>")]
+struct Args {
+    /// Path to the directory to organize
+    #[arg(value_name = "DIRECTORY")]
+    directory: PathBuf,
+
+    /// Undo the previous organization
+    #[arg(long, conflicts_with = "dry_run")]
+    undo: bool,
+
+    /// Simulate the organization without making changes
+    #[arg(long, short = 'n')]
+    dry_run: bool,
+
+    /// Path to configuration file
+    #[arg(long, value_name = "PATH")]
+    config: Option<PathBuf>,
+}
 
 fn main() {
-    println!("Welcome to dirtidy - directory organization made easy!");
+    let args = Args::parse();
 
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() < 2 {
-        eprintln!("Usage: dirtidy <directory_path> [--undo | --dry-run] [--config <path>]");
-        return;
-    }
-
-    let dir_path = &args[1];
-    let base_path = Path::new(dir_path);
-
-    // Parse command-line flags and options
-    let mut undo_mode = false;
-    let mut dry_run_mode = false;
-    let mut config_path: Option<PathBuf> = None;
-
-    let mut i = 2;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--undo" => undo_mode = true,
-            "--dry-run" => dry_run_mode = true,
-            "--config" => {
-                if i + 1 < args.len() {
-                    config_path = Some(PathBuf::from(&args[i + 1]));
-                    i += 1; // Skip next arg since it's the config path
-                } else {
-                    eprintln!("Error: --config requires a path argument");
-                    return;
-                }
-            }
-            arg => {
-                eprintln!("Unknown argument: {}", arg);
-                return;
-            }
-        }
-        i += 1;
-    }
-
-    let command = if undo_mode {
+    let command = if args.undo {
         OrganizeCommand::Undo
     } else {
         OrganizeCommand::Organize {
-            dry_run: dry_run_mode,
+            dry_run: args.dry_run,
         }
     };
 
-    let config_path_ref = config_path.as_deref();
+    let config_path_ref = args.config.as_deref();
 
-    if let Err(e) = run_cli_with_config(command, base_path, config_path_ref) {
-        eprintln!("Error: {}", e);
+    if let Err(e) = run_cli_with_config(command, &args.directory, config_path_ref) {
+        OutputFormatter::error(&e);
+        std::process::exit(1);
     }
 }
