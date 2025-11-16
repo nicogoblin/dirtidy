@@ -14,6 +14,7 @@ use crate::output::OutputFormatter;
 use crate::undo::UndoManager;
 use std::collections::HashMap;
 use std::fs::{self, DirEntry};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Represents a file with its type information.
@@ -339,8 +340,9 @@ fn undo_organization(base_path: &Path) -> Result<(), String> {
 
 /// Detects the file type, MIME type, and category of a given directory entry.
 ///
-/// Uses the `infer` crate to detect MIME type from file content,
-/// then maps it to a category using the provided FileMapper.
+/// Uses the `infer` crate to detect MIME type from file content by reading only
+/// the first 8KB of the file (sufficient for magic byte detection).
+/// Then maps it to a category using the provided FileMapper.
 ///
 /// # Arguments
 ///
@@ -354,8 +356,24 @@ fn detect_file_type(entry: &DirEntry, mapper: &FileMapper) -> FileInfo {
     let name = entry.file_name().to_string_lossy().to_string();
     let path = entry.path();
 
-    let (file_type, mime_type) = if let Ok(data) = std::fs::read(&path) {
-        if let Some(kind) = infer::get(&data) {
+    let (file_type, mime_type) = if let Ok(file) = std::fs::File::open(&path) {
+        let mut buffer = vec![0u8; 8192];
+        let bytes_read = match std::io::Read::read(&mut file.take(8192), &mut buffer) {
+            Ok(n) => n,
+            Err(_) => {
+                return FileInfo {
+                    name,
+                    path,
+                    file_type: None,
+                    mime_type: None,
+                    category: mapper.categorize(None, None),
+                };
+            }
+        };
+
+        buffer.truncate(bytes_read);
+
+        if let Some(kind) = infer::get(&buffer) {
             let mime = kind.mime_type().to_string();
             let extension = kind.extension().to_string();
             (Some(extension), Some(mime))
