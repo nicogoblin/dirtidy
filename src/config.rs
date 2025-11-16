@@ -26,6 +26,7 @@
 //! patterns = []
 //! ```
 
+use glob::Pattern;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -221,9 +222,9 @@ pub struct CompiledFilters {
     enable_hidden_files: bool,
     exclude_filenames: HashSet<String>,
     exclude_extensions: HashSet<String>,
-    exclude_patterns: Vec<String>,
+    exclude_patterns: Vec<Pattern>,
     exclude_regexes: Vec<Regex>,
-    include_patterns: Vec<String>,
+    include_patterns: Vec<Pattern>,
 }
 
 impl CompiledFilters {
@@ -231,8 +232,27 @@ impl CompiledFilters {
     ///
     /// # Errors
     ///
-    /// Returns an error if any regex patterns are invalid.
+    /// Returns an error if any glob or regex patterns are invalid.
     fn new(rules: FilterRules) -> Result<Self, ConfigError> {
+        // Pre-compile all glob patterns and validate them
+        let exclude_patterns = rules
+            .exclude
+            .patterns
+            .iter()
+            .map(|pattern| {
+                Pattern::new(pattern).map_err(|_| ConfigError::InvalidGlobPattern(pattern.clone()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let include_patterns = rules
+            .include
+            .patterns
+            .iter()
+            .map(|pattern| {
+                Pattern::new(pattern).map_err(|_| ConfigError::InvalidGlobPattern(pattern.clone()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         // Pre-compile all regex patterns and validate them
         let exclude_regexes = rules
             .exclude
@@ -255,9 +275,9 @@ impl CompiledFilters {
                 .iter()
                 .map(|ext| ext.to_lowercase())
                 .collect(),
-            exclude_patterns: rules.exclude.patterns,
+            exclude_patterns,
             exclude_regexes,
-            include_patterns: rules.include.patterns,
+            include_patterns,
         })
     }
 
@@ -318,14 +338,14 @@ impl CompiledFilters {
     fn matches_include_patterns(&self, file_path: &Path) -> bool {
         self.include_patterns
             .iter()
-            .any(|pattern| self.glob_match(file_path, pattern))
+            .any(|pattern| pattern.matches_path(file_path))
     }
 
     /// Check if file matches any exclude glob patterns.
     fn matches_exclude_patterns(&self, file_path: &Path) -> bool {
         self.exclude_patterns
             .iter()
-            .any(|pattern| self.glob_match(file_path, pattern))
+            .any(|pattern| pattern.matches_path(file_path))
     }
 
     /// Check if file matches any exclude regex patterns.
@@ -333,36 +353,6 @@ impl CompiledFilters {
         self.exclude_regexes
             .iter()
             .any(|regex| regex.is_match(file_name))
-    }
-
-    /// Simple glob pattern matching.
-    ///
-    /// Supports:
-    /// - `*.ext` - match files with extension
-    /// - `dir/**` - match directory and all contents
-    /// - `filename` - exact match
-    ///
-    /// This is a simplified glob matcher. For complex patterns, use regex instead.
-    fn glob_match(&self, file_path: &Path, pattern: &str) -> bool {
-        let path_str = file_path.to_string_lossy();
-
-        // Handle ** (recursive directory matching)
-        if pattern.contains("**") {
-            let parts: Vec<&str> = pattern.split("**").collect();
-            if parts.len() == 2 {
-                let prefix = parts[0].trim_end_matches('/');
-                // Match if path starts with prefix or pattern is just "**"
-                return prefix.is_empty() || path_str.contains(prefix);
-            }
-        }
-
-        // Handle * wildcard (simple file pattern matching)
-        if let Some(suffix) = pattern.strip_prefix('*') {
-            return path_str.ends_with(suffix);
-        }
-
-        // Exact match or path contains the pattern
-        path_str.contains(pattern)
     }
 }
 
@@ -509,6 +499,179 @@ mod tests {
                 enable_hidden_files: true,
                 exclude: ExcludeRules {
                     regex: vec!["[invalid(".to_string()],
+                    ..Default::default()
+                },
+                include: IncludeRules::default(),
+            },
+        };
+
+        let result = config.compile();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_glob_pattern_directory_boundary_semantics() {
+        // This test verifies that glob patterns respect directory boundaries
+        // Previously, substring matching would incorrectly match "my_logs/file.txt"
+        // when pattern was "**/logs/**"
+        let config = FilterConfig {
+            filters: FilterRules {
+                enable_hidden_files: true,
+                exclude: ExcludeRules {
+                    patterns: vec!["**/logs/**".to_string()],
+                    ..Default::default()
+                },
+                include: IncludeRules::default(),
+            },
+        };
+        let compiled = config.compile().unwrap();
+
+        // Correct matches - logs at any level
+        assert!(!compiled.should_include(Path::new("logs/file.txt")));
+        assert!(!compiled.should_include(Path::new("app/logs/file.txt")));
+
+        // These should NOT match with proper glob semantics
+        assert!(compiled.should_include(Path::new("my_logs/file.txt")));
+        assert!(compiled.should_include(Path::new("app/my_logs/file.txt")));
+    }
+
+    #[test]
+    fn test_glob_pattern_complex_nested_directories() {
+        // Test that glob handles multiple ** patterns correctly
+        let config = FilterConfig {
+            filters: FilterRules {
+                enable_hidden_files: true,
+                exclude: ExcludeRules {
+                    patterns: vec!["**/src/**/test_*.rs".to_string()],
+                    ..Default::default()
+                },
+                include: IncludeRules::default(),
+            },
+        };
+        let compiled = config.compile().unwrap();
+
+        // Should match test files at any depth under any src/
+        assert!(!compiled.should_include(Path::new("src/test_main.rs")));
+        assert!(!compiled.should_include(Path::new("src/utils/test_helpers.rs")));
+        assert!(!compiled.should_include(Path::new("project/src/deep/nested/path/test_utils.rs")));
+
+        // Should NOT match files that don't match the pattern
+        assert!(compiled.should_include(Path::new("src/main.rs")));
+        assert!(compiled.should_include(Path::new("src/utils/helpers.rs")));
+        assert!(compiled.should_include(Path::new("test_main.rs"))); // Not under src/
+    }
+
+    #[test]
+    fn test_glob_pattern_multiple_patterns() {
+        // Test that multiple glob patterns can be specified and work together
+        let config = FilterConfig {
+            filters: FilterRules {
+                enable_hidden_files: true,
+                exclude: ExcludeRules {
+                    patterns: vec![
+                        "**/logs/**".to_string(),
+                        "**/cache/**".to_string(),
+                        "**/tmp/**".to_string(),
+                    ],
+                    ..Default::default()
+                },
+                include: IncludeRules::default(),
+            },
+        };
+        let compiled = config.compile().unwrap();
+
+        // Files in these directories should be excluded
+        assert!(!compiled.should_include(Path::new("logs/app.log")));
+        assert!(!compiled.should_include(Path::new("app/logs/debug.log")));
+        assert!(!compiled.should_include(Path::new("cache/data.bin")));
+        assert!(!compiled.should_include(Path::new("tmp/tempfile.txt")));
+
+        // Other files should be included
+        assert!(compiled.should_include(Path::new("src/main.rs")));
+        assert!(compiled.should_include(Path::new("data/app.log")));
+    }
+
+    #[test]
+    fn test_glob_pattern_character_class() {
+        // Test that glob handles character classes
+        let config = FilterConfig {
+            filters: FilterRules {
+                enable_hidden_files: true,
+                exclude: ExcludeRules {
+                    patterns: vec!["[0-9]*.tmp".to_string()],
+                    ..Default::default()
+                },
+                include: IncludeRules::default(),
+            },
+        };
+        let compiled = config.compile().unwrap();
+
+        // Files starting with digits should be excluded
+        assert!(!compiled.should_include(Path::new("1cache.tmp")));
+        assert!(!compiled.should_include(Path::new("99data.tmp")));
+
+        // Files not starting with digits should be included
+        assert!(compiled.should_include(Path::new("cache.tmp")));
+        assert!(compiled.should_include(Path::new("a1cache.tmp")));
+    }
+
+    #[test]
+    fn test_glob_pattern_recursive_directory_matching() {
+        // Test that ** properly matches across multiple levels
+        let config = FilterConfig {
+            filters: FilterRules {
+                enable_hidden_files: true,
+                exclude: ExcludeRules {
+                    patterns: vec!["**/node_modules/**".to_string()],
+                    ..Default::default()
+                },
+                include: IncludeRules::default(),
+            },
+        };
+        let compiled = config.compile().unwrap();
+
+        // Should match node_modules at any depth
+        assert!(!compiled.should_include(Path::new("node_modules/pkg/index.js")));
+        assert!(!compiled.should_include(Path::new("src/node_modules/pkg/index.js")));
+        assert!(!compiled.should_include(Path::new("a/b/c/node_modules/pkg/index.js")));
+
+        // Should not match files without node_modules in path
+        assert!(compiled.should_include(Path::new("src/pkg/index.js")));
+        assert!(compiled.should_include(Path::new("my_node_modules/pkg/index.js")));
+    }
+
+    #[test]
+    fn test_glob_pattern_single_char_wildcard() {
+        // Test that glob handles ? (single character wildcard)
+        let config = FilterConfig {
+            filters: FilterRules {
+                enable_hidden_files: true,
+                exclude: ExcludeRules {
+                    patterns: vec!["file?.txt".to_string()],
+                    ..Default::default()
+                },
+                include: IncludeRules::default(),
+            },
+        };
+        let compiled = config.compile().unwrap();
+
+        // Single character in that position should be excluded
+        assert!(!compiled.should_include(Path::new("file1.txt")));
+        assert!(!compiled.should_include(Path::new("filea.txt")));
+
+        // Different pattern should be included
+        assert!(compiled.should_include(Path::new("file.txt")));
+        assert!(compiled.should_include(Path::new("file12.txt")));
+    }
+
+    #[test]
+    fn test_invalid_glob_pattern_returns_error() {
+        // Test that invalid glob patterns are caught during compilation
+        let config = FilterConfig {
+            filters: FilterRules {
+                enable_hidden_files: true,
+                exclude: ExcludeRules {
+                    patterns: vec!["[invalid".to_string()], // Unclosed bracket
                     ..Default::default()
                 },
                 include: IncludeRules::default(),
