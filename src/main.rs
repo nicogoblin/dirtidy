@@ -8,10 +8,10 @@ use std::path::PathBuf;
 /// Automatically organizes files in a directory into category-based subdirectories.
 /// Supports dry-run mode for safe previewing and undo functionality to revert changes.
 #[derive(Parser, Debug)]
-#[command(name = "dirtidy")]
-#[command(about = "Directory organization made easy!", long_about = None)]
-#[command(version)]
-#[command(author = "Nicola Bonsi <nicola.bonsi95@gmail.com>")]
+#[command(name = env!("CARGO_PKG_NAME"))]
+#[command(about = env!("CARGO_PKG_DESCRIPTION"))]
+#[command(version = env!("CARGO_PKG_VERSION"))]
+#[command(author = env!("CARGO_PKG_AUTHORS"))]
 struct Args {
     /// Path to the directory to organize
     #[arg(value_name = "DIRECTORY")]
