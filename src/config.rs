@@ -41,8 +41,13 @@ pub enum ConfigError {
     ConfigInvalid(String),
     /// Invalid glob pattern provided.
     InvalidGlobPattern(String),
-    /// Invalid regex pattern provided.
-    InvalidRegexPattern(String),
+    /// Invalid regex pattern provided with the actual error reason.
+    InvalidRegexPattern {
+        /// The regex pattern that failed to compile.
+        pattern: String,
+        /// The reason why the pattern is invalid.
+        reason: String,
+    },
     /// IO error while reading configuration.
     IoError(String),
 }
@@ -61,8 +66,8 @@ impl std::fmt::Display for ConfigError {
                     pattern
                 )
             }
-            ConfigError::InvalidRegexPattern(pattern) => {
-                write!(f, "Invalid regex pattern '{}': {}", pattern, pattern)
+            ConfigError::InvalidRegexPattern { pattern, reason } => {
+                write!(f, "Invalid regex pattern '{}': {}", pattern, reason)
             }
             ConfigError::IoError(msg) => write!(f, "IO error reading configuration: {}", msg),
         }
@@ -234,7 +239,10 @@ impl CompiledFilters {
             .regex
             .iter()
             .map(|pattern| {
-                Regex::new(pattern).map_err(|_| ConfigError::InvalidRegexPattern(pattern.clone()))
+                Regex::new(pattern).map_err(|e| ConfigError::InvalidRegexPattern {
+                    pattern: pattern.clone(),
+                    reason: e.to_string(),
+                })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
