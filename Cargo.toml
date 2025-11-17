@@ -1,6 +1,6 @@
 [package]
 name = "dirtidy"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["Nicola Bonsi <nicola.bonsi95@gmail.com>"]
 description = "Automatically organize files into category-based subdirectories with dry-run and undo support."
