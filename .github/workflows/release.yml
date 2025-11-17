@@ -16,14 +16,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create Release
+      - name: Create Release (if not exists)
         run: |
-          gh release create "${{ github.ref_name }}" \
-            --title "${{ github.ref_name }}" \
-            --notes "Release ${{ github.ref_name }}" \
-            || true
+          # Check if release exists
+          if ! gh release view "${{ github.ref_name }}" > /dev/null 2>&1; then
+            gh release create "${{ github.ref_name }}" \
+              --title "${{ github.ref_name }}" \
+              --notes "Release ${{ github.ref_name }}"
+          fi
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
 
   build-release:
     needs: create-release
@@ -96,7 +98,7 @@ jobs:
             "${{ matrix.asset_name }}.zip" \
             --clobber
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Upload Release Assets (Windows)
         if: matrix.os == 'windows-latest'
@@ -106,4 +108,4 @@ jobs:
             --clobber
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
